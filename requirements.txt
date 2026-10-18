@@ -1,0 +1,9 @@
+lightgbm==4.7.0
+matplotlib==3.11.2
+numpy==2.5.4
+pandas==2.2.3
+pyarrow==26.0.0
+pytest==9.1.1
+PyYAML==6.0.3
+scikit-learn==1.9.1
+wrds==3.5.0

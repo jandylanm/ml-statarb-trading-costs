@@ -1,0 +1,9 @@
+[project]
+name = "ml-statarb-trading-costs"
+version = "0.1.0"
+description = "ML statistical arbitrage on the S&P 500 after stock-specific trading costs"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

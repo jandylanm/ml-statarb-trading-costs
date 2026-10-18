@@ -1,0 +1,42 @@
+# Project configuration
+
+seed: 42
+
+paths:
+  raw: data/raw
+  processed: data/processed
+  results: results
+
+data:
+  start_date: "1990-01-01"
+  end_date: null                        # null = latest available date
+  wrds_username_env: WRDS_USERNAME      # environment variable with the WRDS username
+  daily_table: crsp.dsf_v2              # CRSP daily stock file (CIZ format)
+  membership_table: crsp.dsp500list_v2  # S&P 500 membership intervals
+
+# Look-back horizons in trading days (Krauss et al., 2017): 1-20 and 40, 60, ..., 240
+features:
+  horizons: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20,
+             40, 60, 80, 100, 120, 140, 160, 180, 200, 220, 240]
+
+study_periods:
+  train_days: 750   # the first 240 days are only used as look-back
+  trade_days: 250
+
+# Gradient-boosted trees (LightGBM), settings from the paper
+model:
+  n_estimators: 100
+  max_depth: 3
+  num_leaves: 8
+  learning_rate: 0.1
+  colsample_bynode: 0.5   # roughly 15 of 31 features per split
+
+backtest:
+  k_values: [10, 50]
+  lags: [0, 1]            # 0: trade at the close of day t (paper), 1: one day later
+  days_per_year: 252
+  paper_period: ["1992-12-01", "2015-10-31"]
+
+costs:
+  spread_window: 21       # rolling window for the spread estimate (Step 3)
+  flat_cost_bps: 5        # flat costs per half-turn in the paper
