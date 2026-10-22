@@ -37,6 +37,15 @@ def long_short_returns(pred: pd.DataFrame, score: str, k: int, lag: int = 0) -> 
     return long - short
 
 
+def portfolio_weights(pred: pd.DataFrame, score: str, k: int) -> pd.DataFrame:
+    """Weights of the long-short portfolio as a matrix (dates x stocks): +1/k long, -1/k short, 0 else."""
+    df = rank_by_score(pred, score)
+    df["weight"] = 0.0
+    df.loc[df["rank"] < k, "weight"] = 1 / k
+    df.loc[df["rank"] >= df["n"] - k, "weight"] = -1 / k
+    return df.pivot(index="date", columns="id", values="weight").fillna(0.0)
+
+
 def hit_rate(pred: pd.DataFrame, score: str, k: int) -> float:
     """Share of held positions on the right side of the median (long: y = 1, short: y = 0)."""
     df = rank_by_score(pred, score)

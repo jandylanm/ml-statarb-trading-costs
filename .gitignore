@@ -7,6 +7,9 @@ PROJEKTSTAND.md
 leitfaden/
 papers/*.pdf
 
+# Editor settings
+.vscode/
+
 # Python
 .venv/
 __pycache__/

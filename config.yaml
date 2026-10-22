@@ -38,5 +38,14 @@ backtest:
   paper_period: ["1992-12-01", "2015-10-31"]
 
 costs:
-  spread_window: 21       # rolling window for the spread estimate (Step 3)
+  spread_window: 21       # rolling window (trading days) for the spread estimate
+  spread_min_obs: 10      # minimum number of two-day estimates in the window
   flat_cost_bps: 5        # flat costs per half-turn in the paper
+  # Minimum price increment (USD) from each date on; the spread estimate is floored
+  # at one tick relative to the close. Dates are the earliest switch across NYSE and
+  # Nasdaq: sixteenths from June 1997, decimals from January 2001 (NYSE first;
+  # Nasdaq followed in April 2001).
+  tick_sizes:
+    "1990-01-01": 0.125
+    "1997-06-02": 0.0625
+    "2001-01-29": 0.01
