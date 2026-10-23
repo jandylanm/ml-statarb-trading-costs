@@ -12,6 +12,10 @@ estimate each day (mean of the two-day estimates over the past year, before the
 tick floor) and splits the gross return and the
 costs of each strategy by the quintile of the held stocks (results/liquidity).
 
+Step 4 (holding buffer): repeats the backtest with a buffered portfolio that sells
+a stock only when it leaves the top/bottom 2k, and compares turnover, gross and
+net returns with the baseline (results/buffer).
+
 Usage:
     python scripts/03_run_costs.py           # spread estimates are cached
     python scripts/03_run_costs.py --force   # recompute the spread estimates
@@ -24,9 +28,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
-from src.backtest import long_short_returns, performance, portfolio_weights
+from src.backtest import (buffer_weights, long_short_returns, performance, portfolio_weights,
+                          weighted_returns)
 from src.config import load_config
 from src.costs import (breakeven_spread, quintile_contributions, rolling_spread, spread_costs,
                        spread_quintiles, turnover)
@@ -40,6 +46,8 @@ out_dir = cfg["paths"]["results"] / "costs"
 out_dir.mkdir(parents=True, exist_ok=True)
 liq_dir = cfg["paths"]["results"] / "liquidity"
 liq_dir.mkdir(parents=True, exist_ok=True)
+buf_dir = cfg["paths"]["results"] / "buffer"
+buf_dir.mkdir(parents=True, exist_ok=True)
 
 # ----------------------------------------------------------------------------
 # Spread estimates (stock level, cached in data/processed)
@@ -211,6 +219,58 @@ for col in ["gross", "net"]:
     print(quintile_by_year.loc["gbt_k10_lag0", col].unstack("quintile").round(3).to_string())
 
 # ----------------------------------------------------------------------------
+# Step 4: holding buffer (sell only when the stock leaves the top/bottom buffer_multiple x k)
+# ----------------------------------------------------------------------------
+returns_by_lag = {lag: pred.pivot(index="date", columns="id", values=f"ret_t{lag + 1}")
+                  for lag in cfg["backtest"]["lags"]}
+buffer_daily, buffer_turnover = {}, {}
+for signal in ["gbt", "reversal"]:
+    for k in cfg["backtest"]["k_values"]:
+        weights = buffer_weights(pred, signal, k, cfg["backtest"]["buffer_multiple"] * k)
+        to = turnover(weights)
+        for lag in cfg["backtest"]["lags"]:
+            name = f"{signal}_k{k}_lag{lag}"
+            gross = weighted_returns(weights, returns_by_lag[lag])
+            exec_spreads = spread_matrix.shift(-lag).reindex(index=weights.index, columns=weights.columns)
+            buffer_daily[f"{name}_gross"] = gross
+            buffer_daily[f"{name}_flat"] = gross - flat * to
+            buffer_daily[f"{name}_cs"] = gross - spread_costs(weights, exec_spreads)
+            buffer_turnover[name] = to.mean()
+
+buffer_daily = pd.DataFrame(buffer_daily)
+buffer_daily.to_csv(buf_dir / "daily_returns.csv", float_format="%.6f")
+buffer_summary = performance(buffer_daily, days)
+
+# baseline and buffer side by side; cost share = share of the gross return lost to spread costs
+rows = []
+for name in stats.index:
+    for rule, perf, to_mean in [("baseline", summary, stats.loc[name, "turnover"]),
+                                ("buffer", buffer_summary, buffer_turnover[name])]:
+        row = {"strategy": name, "rule": rule, "turnover": to_mean}
+        for scen in ["gross", "flat", "cs"]:
+            row[f"mean_{scen}"] = perf.loc[f"{name}_{scen}", "mean_daily"] * 100
+        for scen in ["gross", "flat", "cs"]:
+            row[f"sharpe_{scen}"] = perf.loc[f"{name}_{scen}", "sharpe"]
+        row["cost_share"] = 1 - row["mean_cs"] / row["mean_gross"]
+        rows.append(row)
+buffer_table = pd.DataFrame(rows).set_index(["strategy", "rule"])
+buffer_table.to_csv(buf_dir / "summary.csv", float_format="%.4f")
+
+turnover_down = all(buffer_turnover[n] < stats.loc[n, "turnover"] for n in stats.index)
+print(f"\nHolding buffer lowers the turnover of every strategy: {turnover_down}")
+print("Baseline vs. holding buffer: turnover, mean daily return (%), Sharpe ratio, cost share")
+print(buffer_table.round(3).to_string())
+
+buffer_by_year = pd.DataFrame({
+    "baseline_gross": daily["gbt_k10_lag0_gross"], "buffer_gross": buffer_daily["gbt_k10_lag0_gross"],
+    "baseline_cs": daily["gbt_k10_lag0_cs"], "buffer_cs": buffer_daily["gbt_k10_lag0_cs"],
+})
+buffer_by_year = buffer_by_year.groupby(buffer_by_year.index.year).mean() * 100
+buffer_by_year.to_csv(buf_dir / "by_year.csv", float_format="%.4f")
+print("\nMean daily return by year (%), gbt k=10 lag 0, before costs and after Corwin-Schultz costs:")
+print(buffer_by_year.round(3).to_string())
+
+# ----------------------------------------------------------------------------
 # Figures
 # ----------------------------------------------------------------------------
 fig, ax = plt.subplots(figsize=(8, 4))
@@ -255,3 +315,17 @@ ax.set_title("Gradient-boosted trees, k = 10: return contribution by spread quin
 ax.legend()
 fig.tight_layout()
 fig.savefig(liq_dir / "returns_by_spread_quintile.png", dpi=150)
+
+fig, ax = plt.subplots(figsize=(8, 4))
+gbt_names = [n for n in stats.index if n.startswith("gbt")]
+x = np.arange(len(gbt_names))
+for shift, rule, label in [(-0.2, "baseline", "Baseline (top/bottom k)"),
+                           (0.2, "buffer", f"Holding buffer (sell outside top/bottom {cfg['backtest']['buffer_multiple']}k)")]:
+    ax.bar(x + shift, [buffer_table.loc[(n, rule), "sharpe_cs"] for n in gbt_names], width=0.4, label=label)
+ax.axhline(0, color="black", linewidth=0.8)
+ax.set_xticks(x, [n.replace("gbt_", "").replace("_lag", ", lag ").replace("k", "k = ") for n in gbt_names])
+ax.set_ylabel("Sharpe ratio after estimated spread costs")
+ax.set_title("Gradient-boosted trees: net Sharpe ratio with and without holding buffer")
+ax.legend()
+fig.tight_layout()
+fig.savefig(buf_dir / "net_sharpe_buffer.png", dpi=150)

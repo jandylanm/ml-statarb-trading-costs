@@ -34,6 +34,7 @@ model:
 backtest:
   k_values: [10, 50]
   lags: [0, 1]            # 0: trade at the close of day t (paper), 1: one day later
+  buffer_multiple: 2      # holding buffer: sell only when the stock leaves the top/bottom 2k (fixed, not tuned)
   days_per_year: 252
   paper_period: ["1992-12-01", "2015-10-31"]
 

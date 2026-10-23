@@ -46,6 +46,49 @@ def portfolio_weights(pred: pd.DataFrame, score: str, k: int) -> pd.DataFrame:
     return df.pivot(index="date", columns="id", values="weight").fillna(0.0)
 
 
+def keep_and_fill(ranked_ids: np.ndarray, held: set, k: int, buffer: int) -> set:
+    """One leg of the buffered portfolio on one day.
+
+    ranked_ids: stock ids of the day, best first (for the short leg: worst first)
+    held:       ids held in this leg on the previous day
+
+    Keeps the held stocks that are still among the first `buffer` ids and fills
+    the free places with the best-ranked new stocks from the first k ids. Held
+    stocks that left the universe are not in `ranked_ids` and are sold.
+    """
+    keep = [i for i in ranked_ids[:buffer] if i in held]
+    new = [i for i in ranked_ids[:k] if i not in held]
+    return set(keep + new[:k - len(keep)])
+
+
+def buffer_weights(pred: pd.DataFrame, score: str, k: int, buffer: int) -> pd.DataFrame:
+    """Weights of the long-short portfolio with a holding buffer (dates x stocks).
+
+    A stock enters the long (short) leg only from the top (bottom) k, but a held
+    stock is sold only when it leaves the top (bottom) `buffer`. Each leg always
+    holds k stocks with weight +-1/k. With buffer = k this is portfolio_weights.
+    """
+    df = rank_by_score(pred, score)
+    long, short = set(), set()
+    long_rows, short_rows = [], []
+    for _, day in df.groupby("date"):   # rows of a day are sorted by rank
+        ids = day["id"].to_numpy()
+        long = keep_and_fill(ids, long, k, buffer)
+        short = keep_and_fill(ids[::-1], short, k, buffer)
+        long_rows += day.index[day["id"].isin(long)].tolist()
+        short_rows += day.index[day["id"].isin(short)].tolist()
+    df["weight"] = 0.0
+    df.loc[long_rows, "weight"] = 1 / k
+    df.loc[short_rows, "weight"] = -1 / k
+    return df.pivot(index="date", columns="id", values="weight").fillna(0.0)
+
+
+def weighted_returns(weights: pd.DataFrame, returns: pd.DataFrame) -> pd.Series:
+    """Daily portfolio return: sum over all stocks of weight x return (missing returns count as 0)."""
+    returns = returns.reindex(index=weights.index, columns=weights.columns).fillna(0)
+    return (weights * returns).sum(axis=1)
+
+
 def hit_rate(pred: pd.DataFrame, score: str, k: int) -> float:
     """Share of held positions on the right side of the median (long: y = 1, short: y = 0)."""
     df = rank_by_score(pred, score)
