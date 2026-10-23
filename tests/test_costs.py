@@ -4,7 +4,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.costs import breakeven_spread, rolling_spread, spread_costs, tick_size, turnover, two_day_spread
+from src.costs import (breakeven_spread, quintile_contributions, rolling_spread, spread_costs,
+                       spread_quintiles, tick_size, turnover, two_day_spread)
 
 
 def simulate_prices(n_days: int, spread: float, seed: int = 0) -> tuple:
@@ -78,3 +79,33 @@ def test_tick_size_floor():
     result = rolling_spread(panel, window=21, min_obs=1, ticks=ticks).iloc[-1]
     assert result["unfloored"] < 0
     assert result["spread"] == pytest.approx(0.125 / 101)
+
+
+def test_spread_quintiles_and_contributions_add_up():
+    # one day, ten index members with spreads 1..10 bps: two stocks per quintile
+    spreads = pd.DataFrame({"date": pd.Timestamp("2020-01-02"), "id": range(10),
+                            "unfloored": np.arange(1, 11) / 10_000})
+    quintiles = spread_quintiles(spreads)
+    np.testing.assert_allclose(quintiles.iloc[0], [1, 1, 2, 2, 3, 3, 4, 4, 5, 5])
+
+    # two days, k = 2: long the two most liquid stocks, short stocks in quintiles 4 and 5;
+    # on day 2 one long position moves into a stock without spread estimate (id 10)
+    quintiles = pd.concat([quintiles, quintiles.set_axis([pd.Timestamp("2020-01-03")])])
+    weights = pd.DataFrame(0.0, index=quintiles.index, columns=range(11))
+    weights.loc[:, [0, 1]] = 0.5
+    weights.loc[:, [7, 9]] = -0.5
+    weights.loc["2020-01-03", [1, 10]] = [0.0, 0.5]
+    rng = np.random.default_rng(0)
+    returns = pd.DataFrame(rng.normal(0, 0.02, weights.shape), index=weights.index, columns=weights.columns)
+    exec_spreads = pd.DataFrame(rng.uniform(0.0005, 0.005, weights.shape), index=weights.index,
+                                columns=weights.columns)
+
+    contrib = quintile_contributions(weights, returns, exec_spreads, quintiles)
+    totals = contrib.groupby("date")[["gross", "cost", "traded"]].sum()
+    np.testing.assert_allclose(totals["gross"], (weights * returns).sum(axis=1))
+    np.testing.assert_allclose(totals["cost"], spread_costs(weights, exec_spreads))
+    np.testing.assert_allclose(totals["traded"], turnover(weights))
+
+    # the stock without estimate counts in the middle quintile; quintiles 1, 4, 5 hold the rest
+    day2 = contrib[contrib["date"] == pd.Timestamp("2020-01-03")].set_index("quintile")
+    np.testing.assert_allclose(day2["positions"], [1, 0, 1, 1, 1])

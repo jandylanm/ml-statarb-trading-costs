@@ -101,8 +101,8 @@ def breakeven_spread(gross: pd.Series, turnover: pd.Series) -> float:
     return 2 * gross.sum() / turnover.sum()
 
 
-def spread_costs(weights: pd.DataFrame, spreads: pd.DataFrame) -> pd.Series:
-    """Daily costs: half the estimated spread for every unit traded, sum over all stocks.
+def stock_costs(weights: pd.DataFrame, spreads: pd.DataFrame) -> pd.DataFrame:
+    """Costs per stock and day: half the estimated spread for every unit traded.
 
     `spreads` has the same shape as `weights` and contains the spread estimate
     of the trading day. A missing estimate (e.g., in the first days after a
@@ -110,4 +110,66 @@ def spread_costs(weights: pd.DataFrame, spreads: pd.DataFrame) -> pd.Series:
     """
     daily_median = spreads.median(axis=1)
     spreads = spreads.T.fillna(daily_median).T   # fill each day's gaps with that day's median
-    return (spreads / 2 * trades(weights)).sum(axis=1)
+    return spreads / 2 * trades(weights)
+
+
+def spread_costs(weights: pd.DataFrame, spreads: pd.DataFrame) -> pd.Series:
+    """Daily costs: half the estimated spread for every unit traded, sum over all stocks."""
+    return stock_costs(weights, spreads).sum(axis=1)
+
+
+# ----------------------------------------------------------------------------
+# Liquidity (spread) quintiles
+# ----------------------------------------------------------------------------
+def spread_quintiles(spreads: pd.DataFrame, n_groups: int = 5) -> pd.DataFrame:
+    """Spread quintile of each stock and day as a matrix (dates x stocks).
+
+    `spreads` is a long frame with the columns date, id and unfloored, and should
+    contain only the stocks that define the breakpoints (the index members of
+    the day). Stocks are ranked by their spread estimate on each day: quintile 1
+    holds the 20 % of stocks with the smallest spreads (most liquid), quintile 5
+    the 20 % with the largest. Stocks without an estimate get no quintile.
+    """
+    df = spreads.dropna(subset=["unfloored"]).copy()
+    pct = df.groupby("date")["unfloored"].rank(method="first", pct=True)  # in (0, 1]
+    df["quintile"] = np.ceil(pct * n_groups)
+    return df.pivot(index="date", columns="id", values="quintile")
+
+
+def quintile_contributions(weights: pd.DataFrame, returns: pd.DataFrame, spreads: pd.DataFrame,
+                           quintiles: pd.DataFrame, n_groups: int = 5) -> pd.DataFrame:
+    """Daily gross return, costs and trading per spread quintile.
+
+    weights:   portfolio weights (dates x stocks), formed on day t
+    returns:   return each weight earns (same shape; missing returns count as 0)
+    spreads:   spread estimate of the trading day (same shape, as in spread_costs)
+    quintiles: spread quintile of each stock on day t (from spread_quintiles)
+
+    Returns a long frame with one row per day and quintile and the columns
+    gross (sum of weight x return), cost (half spread x |dw|), net (gross - cost),
+    positions (number of held stocks) and traded (sum of |dw|). Summed over the
+    quintiles, gross, cost and traded equal the portfolio's gross return, its
+    spread costs and its turnover. A held stock without quintile (no spread
+    estimate) is put into the middle quintile, in line with spread_costs, which
+    charges it the median spread of the day.
+    """
+    quintiles = quintiles.reindex(index=weights.index, columns=weights.columns).fillna((n_groups + 1) // 2)
+    gross = weights * returns.reindex(index=weights.index, columns=weights.columns).fillna(0)
+    cost = stock_costs(weights, spreads.reindex(index=weights.index, columns=weights.columns))
+    traded = trades(weights)
+    held = weights != 0
+
+    rows = []
+    for q in range(1, n_groups + 1):
+        in_q = quintiles == q
+        part = pd.DataFrame({
+            "date": weights.index,
+            "quintile": q,
+            "gross": gross[in_q].sum(axis=1).to_numpy(),
+            "cost": cost[in_q].sum(axis=1).to_numpy(),
+            "positions": (held & in_q).sum(axis=1).to_numpy(),
+            "traded": traded[in_q].sum(axis=1).to_numpy(),
+        })
+        part["net"] = part["gross"] - part["cost"]
+        rows.append(part)
+    return pd.concat(rows, ignore_index=True)

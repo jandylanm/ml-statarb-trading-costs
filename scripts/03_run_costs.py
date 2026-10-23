@@ -7,6 +7,11 @@ every unit traded (spread floored at one tick, main scenario), and the same with
 the spread floored at zero only (robustness). Uses the predictions of
 scripts/02_run_baseline.py.
 
+Step 4 (liquidity): sorts the index members into quintiles by their spread
+estimate each day (mean of the two-day estimates over the past year, before the
+tick floor) and splits the gross return and the
+costs of each strategy by the quintile of the held stocks (results/liquidity).
+
 Usage:
     python scripts/03_run_costs.py           # spread estimates are cached
     python scripts/03_run_costs.py --force   # recompute the spread estimates
@@ -23,7 +28,8 @@ import pandas as pd
 
 from src.backtest import long_short_returns, performance, portfolio_weights
 from src.config import load_config
-from src.costs import breakeven_spread, rolling_spread, spread_costs, turnover
+from src.costs import (breakeven_spread, quintile_contributions, rolling_spread, spread_costs,
+                       spread_quintiles, turnover)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--force", action="store_true")
@@ -32,6 +38,8 @@ args = parser.parse_args()
 cfg = load_config()
 out_dir = cfg["paths"]["results"] / "costs"
 out_dir.mkdir(parents=True, exist_ok=True)
+liq_dir = cfg["paths"]["results"] / "liquidity"
+liq_dir.mkdir(parents=True, exist_ok=True)
 
 # ----------------------------------------------------------------------------
 # Spread estimates (stock level, cached in data/processed)
@@ -46,6 +54,11 @@ if spreads is None or "unfloored" not in spreads.columns:  # no cache, --force, 
 
 # aggregate checks on index members only
 spreads["spread_zero"] = spreads["unfloored"].clip(lower=0)  # robustness: floored at zero instead of one tick
+# one-year mean of the two-day estimates for the liquidity sort (see the quintiles below)
+spreads = spreads.sort_values(["id", "date"])
+long_mean = spreads.groupby("id")["raw"].rolling(cfg["costs"]["quintile_window"],
+                                                 min_periods=cfg["costs"]["quintile_min_obs"]).mean()
+spreads["unfloored_long"] = long_mean.reset_index(level=0, drop=True)
 members = spreads.merge(panel.loc[panel["in_sp500"], ["id", "date"]], on=["id", "date"])
 by_month = members.groupby(members["date"].dt.to_period("M"))["spread"].median()
 by_month.to_csv(out_dir / "median_spread_by_month.csv", float_format="%.6f")
@@ -82,8 +95,16 @@ pred = pd.concat([pd.read_parquet(p) for p in sorted((cfg["paths"]["processed"] 
 spread_matrix = spreads.pivot(index="date", columns="id", values="spread")
 spread_matrix_zero = spreads.pivot(index="date", columns="id", values="spread_zero")
 flat = cfg["costs"]["flat_cost_bps"] / 10_000
+# liquidity class of each stock on the signal day: breakpoints from all index members,
+# sorted by the spread estimate before the tick floor (the floor would tie many stocks).
+# The sort uses the mean over one year, not the 21-day estimate of the costs: a single
+# stock's 21-day estimate is very noisy, more so for volatile stocks, which the strategy
+# prefers, so they would land in the top or bottom quintile by chance.
+sort_input = members[["date", "id", "unfloored_long"]].rename(columns={"unfloored_long": "unfloored"})
+quintiles = spread_quintiles(sort_input)
 
 daily, stats, breakeven_by_year = {}, {}, {}
+contributions, max_gap = [], 0.0
 for signal in ["gbt", "reversal"]:
     for k in cfg["backtest"]["k_values"]:
         weights = portfolio_weights(pred, signal, k)
@@ -113,6 +134,18 @@ for signal in ["gbt", "reversal"]:
                 {y: breakeven_spread(gross[year == y], to[year == y]) * 10_000 for y in sorted(set(year))})
             if name == "gbt_k10_lag0":  # spread paid by the main strategy, by year
                 paid_by_year = 2 * cost_cs.groupby(year).sum() / to.groupby(year).sum() * 10_000
+
+            # gross return and costs by spread quintile of the held stocks
+            returns = pred.pivot(index="date", columns="id", values=f"ret_t{lag + 1}")
+            contrib = quintile_contributions(weights, returns, exec_spreads, quintiles)
+            contrib["strategy"] = name
+            contributions.append(contrib)
+            totals = contrib.groupby("date")[["gross", "cost"]].sum()
+            max_gap = max(max_gap, (totals["gross"] - gross).abs().max(), (totals["cost"] - cost_cs).abs().max())
+            if name == "gbt_k10_lag0":
+                held = weights != 0
+                no_quintile = held & quintiles.reindex(index=weights.index, columns=weights.columns).isna()
+                share_no_quintile = no_quintile.sum().sum() / held.sum().sum()
 
 daily = pd.DataFrame(daily)
 daily.to_csv(out_dir / "daily_returns.csv", float_format="%.6f")
@@ -147,6 +180,37 @@ print("\nBreak-even spread by year (bps): spread at which costs eat the whole gr
 print(breakeven_by_year[["gbt_k10_lag0", "gbt_k10_lag1", "gbt_k50_lag0", "reversal_k10_lag0"]].round(1).to_string())
 
 # ----------------------------------------------------------------------------
+# Step 4: gross and net returns by spread quintile (1 = smallest spreads)
+# ----------------------------------------------------------------------------
+contributions = pd.concat(contributions, ignore_index=True)
+contributions["year"] = contributions["date"].dt.year
+
+
+def quintile_table(df: pd.DataFrame, by: list[str]) -> pd.DataFrame:
+    """Mean daily contributions (in %), shares of positions and turnover and spread paid per group."""
+    sums = df.groupby(by)[["positions", "traded", "cost"]].sum()
+    totals = sums.groupby(level=by[:-1])[["positions", "traded"]].transform("sum")  # all quintiles together
+    table = df.groupby(by)[["gross", "cost", "net"]].mean() * 100
+    table["share_positions"] = sums["positions"] / totals["positions"]
+    table["share_turnover"] = sums["traded"] / totals["traded"]
+    table["spread_paid_bps"] = 2 * sums["cost"] / sums["traded"] * 10_000
+    return table
+
+
+by_quintile = quintile_table(contributions, ["strategy", "quintile"])
+by_quintile.to_csv(liq_dir / "quintile_summary.csv", float_format="%.6f")
+quintile_by_year = quintile_table(contributions, ["strategy", "year", "quintile"])
+quintile_by_year.to_csv(liq_dir / "quintile_by_year.csv", float_format="%.6f")
+
+print(f"\nLargest gap between the sum over quintiles and the total (gross or costs): {max_gap:.2e}")
+print(f"Share of held positions without spread quintile (gbt k=10 lag 0): {share_no_quintile:.4f}")
+print("\nBy spread quintile (1 = smallest spreads): mean daily gross, costs, net (%), shares, spread paid (bps)")
+print(by_quintile.loc[["gbt_k10_lag0", "gbt_k10_lag1", "gbt_k50_lag0", "reversal_k10_lag0"]].round(3).to_string())
+for col in ["gross", "net"]:
+    print(f"\nMean daily {col} return by year and spread quintile (%), gbt k=10 lag 0:")
+    print(quintile_by_year.loc["gbt_k10_lag0", col].unstack("quintile").round(3).to_string())
+
+# ----------------------------------------------------------------------------
 # Figures
 # ----------------------------------------------------------------------------
 fig, ax = plt.subplots(figsize=(8, 4))
@@ -177,3 +241,17 @@ ax.set_ylabel("Median spread estimate (%)")
 ax.set_title("Corwin-Schultz spread estimates of S&P 500 members")
 fig.tight_layout()
 fig.savefig(out_dir / "median_spread.png", dpi=150)
+
+fig, ax = plt.subplots(figsize=(8, 4))
+main = by_quintile.loc["gbt_k10_lag0"]
+x = main.index.to_numpy()
+ax.bar(x - 0.2, main["gross"], width=0.4, label="Before costs")
+ax.bar(x + 0.2, main["net"], width=0.4, label="After estimated spread costs")
+ax.axhline(0, color="black", linewidth=0.8)
+ax.set_xticks(x, ["1 (smallest spreads)", "2", "3", "4", "5 (largest spreads)"])
+ax.set_xlabel("Spread quintile of the held stock")
+ax.set_ylabel("Mean daily contribution (%)")
+ax.set_title("Gradient-boosted trees, k = 10: return contribution by spread quintile")
+ax.legend()
+fig.tight_layout()
+fig.savefig(liq_dir / "returns_by_spread_quintile.png", dpi=150)
