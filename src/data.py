@@ -102,12 +102,13 @@ def check_panel(panel: pd.DataFrame) -> pd.DataFrame:
     print("Share of missing values on member days:")
     print(m[["ret", "open", "high", "low", "close", "volume"]].isna().mean().round(4).to_string())
 
+    m = m.assign(high_low_missing=m["high"].isna() | m["low"].isna())
     coverage = m.groupby(m["date"].dt.year).agg(
         trading_days=("date", "nunique"),
         member_days=("id", "size"),
         stocks=("id", "nunique"),
         missing_ret=("ret", lambda x: x.isna().mean()),
-        missing_high_low=("high", lambda x: x.isna().mean()),
+        missing_high_low=("high_low_missing", "mean"),
     )
     coverage["members_per_day"] = coverage["member_days"] / coverage["trading_days"]
     return coverage.rename_axis("year")

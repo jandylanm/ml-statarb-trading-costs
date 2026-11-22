@@ -94,6 +94,7 @@ accuracy = {"gbt overall": ((labeled["gbt"] > 0.5) == (labeled["y"] == 1)).mean(
 for k in cfg["backtest"]["k_values"]:
     accuracy[f"gbt hit rate k={k}"] = hit_rate(pred, "gbt", k)
     accuracy[f"reversal hit rate k={k}"] = hit_rate(pred, "reversal", k)
+pd.Series(accuracy, name="value").to_csv(out_dir / "accuracy.csv", float_format="%.4f")
 
 by_year = returns.groupby(returns.index.year).mean()
 by_year.to_csv(out_dir / "by_year.csv", float_format="%.6f")
@@ -115,8 +116,10 @@ fig, ax = plt.subplots(figsize=(8, 4))
 for signal, label in [("gbt", "Gradient-boosted trees"), ("reversal", "Simple reversal")]:
     (1 + returns[f"{signal}_k10_lag0"].fillna(0)).cumprod().plot(ax=ax, label=label)
 ax.set_yscale("log")
+ax.set_xlabel("")
 ax.set_ylabel("Value of 1 invested (log scale)")
-ax.set_title("Long-short portfolio, k = 10, before trading costs")
+title = "Leakage test with random features" if args.noise else "Long-short portfolio"
+ax.set_title(f"{title}, k = 10: before trading costs")
 ax.legend()
 fig.tight_layout()
 fig.savefig(out_dir / "cumulative_returns.png", dpi=150)

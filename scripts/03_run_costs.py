@@ -9,8 +9,8 @@ scripts/02_run_baseline.py.
 
 Step 4 (liquidity): sorts the index members into quintiles by their spread
 estimate each day (mean of the two-day estimates over the past year, before the
-tick floor) and splits the gross return and the
-costs of each strategy by the quintile of the held stocks (results/liquidity).
+tick floor) and splits the gross return and the costs of each strategy by the
+quintile of the held stocks (results/liquidity).
 
 Step 4 (holding buffer): repeats the backtest with a buffered portfolio that sells
 a stock only when it leaves the top/bottom 2k, and compares turnover, gross and
@@ -60,19 +60,21 @@ if spreads is None or "unfloored" not in spreads.columns:  # no cache, --force, 
                              cfg["costs"]["tick_sizes"])
     spreads.to_parquet(spread_path)
 
-# aggregate checks on index members only
 spreads["spread_zero"] = spreads["unfloored"].clip(lower=0)  # robustness: floored at zero instead of one tick
 # one-year mean of the two-day estimates for the liquidity sort (see the quintiles below)
 spreads = spreads.sort_values(["id", "date"])
 long_mean = spreads.groupby("id")["raw"].rolling(cfg["costs"]["quintile_window"],
                                                  min_periods=cfg["costs"]["quintile_min_obs"]).mean()
 spreads["unfloored_long"] = long_mean.reset_index(level=0, drop=True)
+
+# aggregate checks on index members only
 members = spreads.merge(panel.loc[panel["in_sp500"], ["id", "date"]], on=["id", "date"])
 by_month = members.groupby(members["date"].dt.to_period("M"))["spread"].median()
 by_month.to_csv(out_dir / "median_spread_by_month.csv", float_format="%.6f")
+s = members["spread"] * 100
 print("Spread estimates of index members (in percent):")
-print(f"  median {members['spread'].median() * 100:.3f}, mean {members['spread'].mean() * 100:.3f}, "
-      f"10% quantile {members['spread'].quantile(0.1) * 100:.3f}, 90% quantile {members['spread'].quantile(0.9) * 100:.3f}")
+print(f"  median {s.median():.3f}, mean {s.mean():.3f}, "
+      f"10% quantile {s.quantile(0.1):.3f}, 90% quantile {s.quantile(0.9):.3f}")
 print(f"  share of member days without estimate: {members['spread'].isna().mean():.4f}")
 for month in ["2008-10", "2020-03"]:  # crisis months: spreads should be visibly higher
     if pd.Period(month) in by_month.index:
@@ -98,8 +100,8 @@ print(spread_by_year.round(3).to_string())
 # ----------------------------------------------------------------------------
 # Gross and net returns
 # ----------------------------------------------------------------------------
-pred = pd.concat([pd.read_parquet(p) for p in sorted((cfg["paths"]["processed"] / "predictions" / "baseline").glob("*.parquet"))],
-                 ignore_index=True)
+pred_files = sorted((cfg["paths"]["processed"] / "predictions" / "baseline").glob("*.parquet"))
+pred = pd.concat([pd.read_parquet(p) for p in pred_files], ignore_index=True)
 spread_matrix = spreads.pivot(index="date", columns="id", values="spread")
 spread_matrix_zero = spreads.pivot(index="date", columns="id", values="spread_zero")
 flat = cfg["costs"]["flat_cost_bps"] / 10_000
@@ -126,9 +128,9 @@ for signal in ["gbt", "reversal"]:
             cost_cs = spread_costs(weights, exec_spreads)
             cost_cs_zero = spread_costs(weights, exec_spreads_zero)
             daily[f"{name}_gross"] = gross
-            daily[f"{name}_flat"] = gross - flat * to # as in the original paper
-            daily[f"{name}_cs"] = gross - cost_cs # Corwin-Schultz costs, spread floored at one tick
-            daily[f"{name}_cs_zero"] = gross - cost_cs_zero # robustness: spread floored at zero
+            daily[f"{name}_flat"] = gross - flat * to            # as in the original paper
+            daily[f"{name}_cs"] = gross - cost_cs                # Corwin-Schultz costs, spread floored at one tick
+            daily[f"{name}_cs_zero"] = gross - cost_cs_zero      # robustness: spread floored at zero
             stats[name] = {
                 "turnover": to.mean(),
                 "cost_flat_bps": flat * to.mean() * 10_000,
@@ -278,27 +280,30 @@ for scen, label in [("gross", "Before costs"), ("flat", "Flat costs (5 bps per h
                     ("cs", "Estimated spreads (Corwin-Schultz)")]:
     (1 + daily[f"gbt_k10_lag0_{scen}"].fillna(0)).cumprod().plot(ax=ax, label=label)
 ax.set_yscale("log")
+ax.set_xlabel("")
 ax.set_ylabel("Value of 1 invested (log scale)")
-ax.set_title("Gradient-boosted trees, k = 10")
+ax.set_title("Gradient-boosted trees, k = 10: before and after trading costs")
 ax.legend()
 fig.tight_layout()
 fig.savefig(out_dir / "cumulative_returns_costs.png", dpi=150)
 
 fig, ax = plt.subplots(figsize=(8, 4))
-breakeven_by_year["gbt_k10_lag0"].plot(ax=ax, marker="o", label="Break-even spread, trading at the signal close")
-breakeven_by_year["gbt_k10_lag1"].plot(ax=ax, marker="o", label="Break-even spread, trading one day later")
+plotted = breakeven_by_year.loc[1993:]  # 1992 contains only the December trading days
+plotted["gbt_k10_lag0"].plot(ax=ax, marker="o", label="Break-even spread, trading at the signal close")
+plotted["gbt_k10_lag1"].plot(ax=ax, marker="o", label="Break-even spread, trading one day later")
 ax.axhline(2 * cfg["costs"]["flat_cost_bps"], color="gray", linestyle="--", label="Flat costs of the paper")
 ax.axhline(0, color="black", linewidth=0.8)
 ax.set_ylabel("Spread (bps)")
-ax.set_title("Gradient-boosted trees, k = 10: spread at which costs eat the gross return")
+ax.set_title("Gradient-boosted trees, k = 10: break-even spread by year")
 ax.legend()
 fig.tight_layout()
 fig.savefig(out_dir / "breakeven_spread.png", dpi=150)
 
 fig, ax = plt.subplots(figsize=(8, 3.5))
 (by_month * 100).plot(ax=ax)
+ax.set_xlabel("")
 ax.set_ylabel("Median spread estimate (%)")
-ax.set_title("Corwin-Schultz spread estimates of S&P 500 members")
+ax.set_title("S&P 500 members: median Corwin-Schultz spread estimate by month")
 fig.tight_layout()
 fig.savefig(out_dir / "median_spread.png", dpi=150)
 
@@ -319,8 +324,8 @@ fig.savefig(liq_dir / "returns_by_spread_quintile.png", dpi=150)
 fig, ax = plt.subplots(figsize=(8, 4))
 gbt_names = [n for n in stats.index if n.startswith("gbt")]
 x = np.arange(len(gbt_names))
-for shift, rule, label in [(-0.2, "baseline", "Baseline (top/bottom k)"),
-                           (0.2, "buffer", f"Holding buffer (sell outside top/bottom {cfg['backtest']['buffer_multiple']}k)")]:
+buffer_label = f"Holding buffer (sell outside top/bottom {cfg['backtest']['buffer_multiple']}k)"
+for shift, rule, label in [(-0.2, "baseline", "Baseline (top/bottom k)"), (0.2, "buffer", buffer_label)]:
     ax.bar(x + shift, [buffer_table.loc[(n, rule), "sharpe_cs"] for n in gbt_names], width=0.4, label=label)
 ax.axhline(0, color="black", linewidth=0.8)
 ax.set_xticks(x, [n.replace("gbt_", "").replace("_lag", ", lag ").replace("k", "k = ") for n in gbt_names])

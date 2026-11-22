@@ -1,4 +1,4 @@
-"""Tests for study periods and the timing of the long-short returns."""
+"""Tests for study periods, the timing of the long-short returns and the holding buffer."""
 
 import numpy as np
 import pandas as pd
