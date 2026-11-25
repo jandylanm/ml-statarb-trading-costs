@@ -65,7 +65,7 @@ prices. With spread estimates floored at one tick, the net return is negative
 over the full sample and in every year since 2009, and most of the net loss
 comes from the stocks with the largest spreads. A holding buffer cuts the turnover by a
 fifth to a third at almost no loss of gross return and reduces the net losses
-considerably, but the strategy remains unprofitable after costs.
+considerably, but the strategy remains unprofitable after these costs.
 \end{quote}
 \vspace{2ex}
 
@@ -176,10 +176,11 @@ For each period, a LightGBM classifier is fitted on the training days and
 predicts $\hat p^s_t = \mathbb{P}(y^s_t = 1)$ for the trading days. The
 settings follow the paper: 100 trees of depth 3, learning rate 0.1 and about
 half of the features considered at each split. The paper also uses a random
-forest, a deep neural network and an ensemble of all three. I deliberately restrict myself to one model. The focus of this project is on
-trading costs, not on comparing forecasting methods, and one model with a
-realistic gross return is enough to measure how much of that return survives
-the costs. Testing the other models is left for later work.
+forest, a deep neural network and an ensemble of all three. I deliberately
+restrict myself to one model. The focus of this project is on trading costs,
+not on comparing forecasting methods, and one model with a realistic gross
+return is enough to measure how much of that return survives the costs.
+Testing the other models is left for later work.
 
 The benchmark needs no model at all. It ranks the stocks by minus their return
 on day $t$, i.e., it buys the day's losers and sells the day's winners.
@@ -307,9 +308,9 @@ only when it leaves the top $2k$; the short leg works the same way. Free places
 are filled with the highest-ranked stocks of the top $k$ that are not yet held,
 so each leg always holds $k$ stocks with weight $1/k$. A held stock in ranks
 $k+1$ to $2k$ keeps its place, so a stock that enters the top $k$ is not bought
-if no place is free. With a buffer of $k$
-instead of $2k$, the rule is identical to the baseline. I fixed the buffer size
-of $2k$ in advance and did not tune it.
+if no place is free. With a buffer of $k$ instead of $2k$, the rule is
+identical to the baseline. I fixed the buffer size of $2k$ in advance and did
+not tune it.
 
 
 \section{Results}
@@ -360,12 +361,12 @@ lag 0) before trading costs, log scale.}
 
 Over the paper period, the gradient-boosted trees earn about three times as
 much per day as the simple reversal rule (0.38\,\% versus 0.13\,\% for
-$k = 10$). The simple rule stops working after 2001, while the model stays
-clearly profitable until about 2008 (Figure~\ref{fig:cumulative}). Unlike the
+$k = 10$). From 2001 on, the simple rule earns nothing on average, while the
+model stays clearly profitable until about 2008 (Figure~\ref{fig:cumulative}). Unlike the
 simple rule, the model can also draw on the longer look-back returns.
 
 Over time, the returns decline. For $k = 10$, the mean daily return of the
-model is about 0.5--0.85\,\% in 1993--2002 and 0.1--0.3\,\% in 2003--2007. It is
+model is about 0.5--0.85\,\% in 1993--2002 and 0.14--0.33\,\% in 2003--2007. It is
 high again in the financial crisis of 2008 (0.63\,\%) and mostly between 0
 and 0.16\,\% from 2009 on, with 2020 as an exception (0.28\,\%) and negative
 years in 2021 and 2023. This matches the decline reported in the paper and
@@ -378,7 +379,7 @@ most likely reason is the bid-ask bounce. A stock whose closing trade happens
 at the bid looks like a loser and seems to recover on the next day, although
 an investor could not have bought it at that price.
 
-In the leakage test, the hit rates are 50.0\,\% and seven of eight
+In the leakage test, the hit rates are 49.9--50.0\,\% and seven of eight
 specifications have $|t| < 1.3$; one has $t = 2.3$, which is within what one
 expects by chance across eight tests. I find no sign of look-ahead.
 
@@ -395,15 +396,15 @@ days. The simple reversal rule trades more (3.72).
 \centering
 \caption{Mean daily return in percent before and after costs (1992--2025),
 average daily turnover, and break-even spread in basis points (the spread at
-which the costs equal the gross return). Corwin-Schultz: spread estimate
-floored at one tick (main specification) or at zero (robustness).}
+which the costs equal the gross return). Flat: 5 bps per half-turn. CS:
+Corwin-Schultz spread estimate floored at one tick (main specification).
+CS (zero): the same estimate floored at zero (robustness check).}
 \label{tab:costs}
 \small
+\setlength{\tabcolsep}{5pt}
 \begin{tabular}{llrrrrrr}
 \toprule
-& & & & \multicolumn{2}{c}{Corwin-Schultz} & & \\
-\cmidrule(lr){5-6}
-Signal & $k$, lag & Gross & Flat & Tick & Zero & Turnover & Break-even \\
+Signal & $k$, lag & Gross & Flat & CS & CS (zero) & Turnover & Break-even \\
 \midrule
 Gradient-boosted trees & 10, 0 & 0.279 & 0.142 & $-0.101$ & 0.018 & 2.74 & 20.4 \\
                        & 10, 1 & 0.138 & 0.001 & $-0.243$ & $-0.124$ & 2.74 & 10.1 \\
@@ -421,14 +422,14 @@ gross return over the full sample (0.14\,\% per day for $k = 10$). With a
 one-day execution lag, nothing is left, and the simple reversal rule loses
 money in every specification.
 
-With the Corwin-Schultz estimates, every specification loses money after
-costs. The model portfolio with $k = 10$ loses 0.10\,\% per day (Sharpe ratio
+With the Corwin-Schultz estimates floored at one tick, every specification
+loses money after costs. The model portfolio with $k = 10$ loses 0.10\,\% per day (Sharpe ratio
 $-0.86$). On average it pays a spread of 28 bps per unit traded. That is more
-than the median estimate of all index members (18 bps over the whole sample,
-4--13 bps per year since 2010), because the strategy trades the stocks with
+than the median estimate of all index members (4--13 bps per year since 2010),
+because the strategy trades the stocks with
 the largest recent price moves. Year by year, the net return is positive only
 in 1997--2002, 2005--2006 and 2008, plus December 1992, the first month of
-trading. In 1993--1996 the gross return is still 0.5--0.65\,\% per day, but
+trading. In 1993--1996 the gross return is still 0.49--0.65\,\% per day, but
 with prices quoted in eighths of a dollar the strategy pays spreads of
 58--72 bps, which is more than it earns.\footnote{The tick size also shows up
 in the labels. Until 1997 only about 47.5\,\% of the training labels are one,
@@ -446,17 +447,19 @@ so a single two-day estimate is mostly noise; in every year about 40\,\% of them
 are negative. Even after averaging over 21 days, the tick floor binds for
 32--51\,\% of the stock-days since 2001 and for about 90\,\% in 1990--1996, so
 the costs of the early years are essentially the tick size relative to the
-price. The yearly medians move in the expected direction (high in 2000--2002,
-2008--2009 and 2020, low in the late 2010s), but the level per stock is
-uncertain, and for the volatile stocks that the strategy trades in the 2010s I
+price. The yearly medians move in the expected direction: they rise in 2000
+and 2008--2009 and are lowest in 2018--2019 and 2022--2023, and the monthly
+medians (\texttt{results/costs/median\_spread.png}) also jump in spring 2020.
+The level per stock, however, is uncertain, and for the volatile stocks that
+the strategy trades in the 2010s I
 suspect the estimates are too high. I therefore put more weight on the
 break-even analysis, which does not depend on the estimator.
 
 \begin{figure}[ht]
 \centering
 \includegraphics[width=0.85\textwidth]{../results/costs/breakeven_spread.png}
-\caption{Break-even spread by year for the model portfolio ($k = 10$). The
-dashed line marks the flat costs of the paper (5 bps per half-turn, i.e., a
+\caption{Break-even spread by year for the model portfolio ($k = 10$),
+1993--2025 (1992 contains only December and is left out). The dashed line marks the flat costs of the paper (5 bps per half-turn, i.e., a
 spread of 10 bps).}
 \label{fig:breakeven}
 \end{figure}
@@ -469,8 +472,8 @@ mostly between 2 and 12 bps, and in 2021 and 2023 it is negative. With a
 one-day execution lag, it is close to zero from 2009 on. Quoted spreads of
 large US stocks in the 2010s were in the range of a few basis points, and the
 strategy trades the most volatile of them. I therefore conclude that the
-strategy has not been profitable after costs since about 2009, with any of the
-cost measures used here.
+strategy has not been profitable on average after costs since about 2009, with
+any of the cost measures used here.
 
 \subsection{Returns by spread quintile}
 
@@ -479,22 +482,25 @@ portfolio by the spread quintile of the held stocks.
 
 \begin{table}[ht]
 \centering
-\caption{Gradient-boosted trees, $k = 10$, lag 0 (1992--2025): share of held
-positions, mean daily contribution to the gross return, the costs and the net
-return in percent, and average spread paid per unit traded in basis points, by
-spread quintile of the held stock (1 = smallest spreads).}
+\caption{Gradient-boosted trees, $k = 10$, lag 0 (1992--2025), by spread quintile
+of the held stock (Q1: smallest spreads, Q5: largest spreads). Gross, costs and
+net are mean daily contributions to the portfolio return. Gross / share: gross
+contribution divided by the share of positions. Spread paid: average per unit
+traded. Break-even spread: spread at which the costs of the quintile equal its
+gross contribution.}
 \label{tab:quintiles}
-\begin{tabular}{lrrrrr}
+\small
+\begin{tabular}{lrrrrrr}
 \toprule
-Quintile & Positions & Gross & Costs & Net & Spread paid \\
+ & Q1 & Q2 & Q3 & Q4 & Q5 & Total \\
 \midrule
-1 (smallest spreads) & 0.32 & 0.073 & 0.077 & $-0.004$ & 18.4 \\
-2                    & 0.18 & 0.039 & 0.050 & $-0.011$ & 20.2 \\
-3                    & 0.15 & 0.047 & 0.049 & $-0.002$ & 23.5 \\
-4                    & 0.15 & 0.036 & 0.057 & $-0.021$ & 28.0 \\
-5 (largest spreads)  & 0.21 & 0.084 & 0.147 & $-0.063$ & 50.3 \\
-\midrule
-Total                & 1.00 & 0.279 & 0.380 & $-0.101$ & 27.7 \\
+Share of positions (\%)  & 32 & 18 & 15 & 15 & 21 & 100 \\
+Gross (\%)               & 0.073 & 0.039 & 0.047 & 0.036 & 0.084 & 0.279 \\
+Costs (\%)               & 0.077 & 0.050 & 0.049 & 0.057 & 0.147 & 0.380 \\
+\textbf{Net (\%)}        & $\mathbf{-0.004}$ & $\mathbf{-0.011}$ & $\mathbf{-0.002}$ & $\mathbf{-0.021}$ & $\mathbf{-0.063}$ & $\mathbf{-0.101}$ \\
+Gross / share (\%)       & 0.23 & 0.22 & 0.32 & 0.25 & \textbf{0.40} & 0.28 \\
+Spread paid (bps)        & 18 & 20 & 23 & 28 & \textbf{50} & 28 \\
+Break-even spread (bps)  & 17 & 16 & 22 & 18 & \textbf{29} & 20 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -579,8 +585,9 @@ among yesterday's biggest losers is rarely still among today's.
 
 The break-even spread of the model portfolio with $k = 10$ rises from 20 to
 25 bps, and the net loss after Corwin-Schultz costs shrinks from 0.10\,\% to
-0.03\,\% per day (Figure~\ref{fig:buffer}). Year by year, the buffered portfolio is profitable after Corwin-Schultz costs in
-1994, 1997--2002 and 2005--2008, but it still loses money in every year from
+0.03\,\% per day (Figure~\ref{fig:buffer}). Year by year, the buffered
+portfolio is profitable after Corwin-Schultz costs in 1994, 1997--2002 and
+2005--2008 (and in December 1992), but it still loses money in every year from
 2009 on. In the recent period there is simply too little gross return left for
 a lower turnover to make the strategy profitable.
 

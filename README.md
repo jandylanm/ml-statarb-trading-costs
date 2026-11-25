@@ -8,7 +8,7 @@ Daily long-short portfolio of S&P 500 constituents, 1992–2025, with signals fr
 | GBT, k = 10, one-day lag | 0.14 | 0.00 | −0.24 | 2.74 | 10 |
 | GBT, k = 50 | 0.16 | 0.05 | −0.13 | 2.29 | 14 |
 | GBT, k = 10, holding buffer | 0.27 | 0.16 | −0.03 | 2.19 | 25 |
-| 1-day reversal, k = 10 | 0.09 | −0.09 | −0.48 | 3.72 | 5 |
+| Simple reversal, k = 10 | 0.09 | −0.09 | −0.48 | 3.72 | 5 |
 
 Mean daily return in %, daily turnover (4 = full rebalance), break-even spread in bps (spread at which costs equal the gross return).
 
@@ -16,22 +16,22 @@ Mean daily return in %, daily turnover (4 = full rebalance), break-even spread i
 
 - Before costs the rebuild matches the paper: 0.38 % per day over 1992–2015 (paper: 0.37 % for the same model).
 - Half the gross return disappears with a one-day execution lag, most likely bid-ask bounce in closing prices.
-- After estimated spreads every specification loses money. The break-even spread is 36–63 bps until 2002 and mostly 2–12 bps since 2009.
-- The model earns about three times as much as plain 1-day reversal before costs; the reversal rule stops working around 2001.
+- After estimated spreads (floored at one tick) every specification loses money. The break-even spread is 36–63 bps until 2002 and mostly 2–12 bps since 2009.
+- The model earns about three times as much as simple reversal (buy yesterday's losers, sell yesterday's winners) before costs; from 2001 on, simple reversal earns nothing on average.
 
 ![Gross and net returns by spread quintile](results/liquidity/returns_by_spread_quintile.png)
 
 - The widest-spread quintile has the highest gross return per position and about 60 % of the net loss.
-- Three quarters of the reversal rule's gross return come from that quintile.
+- Three quarters of the gross return of simple reversal come from that quintile.
 
 ![Net Sharpe ratio with and without holding buffer](results/buffer/net_sharpe_buffer.png)
 
-- Holding buffer: buy from the top/bottom k, sell only outside the top/bottom 2k (fixed in advance, not tuned). Turnover −20 % (k = 10) to −33 % (k = 50), gross return −3 % to −6 %. Still negative after costs in every year since 2009.
+- Holding buffer: buy from the top/bottom k, sell only outside the top/bottom 2k (fixed in advance, not tuned). Turnover −20 % (k = 10) to −33 % (k = 50), gross return −3 % to −6 %. Still negative after estimated spreads in every year since 2009.
 
 ## Method
 
 - Features: 31 past returns (1–20 days, 40–240 days). Label: next-day return above the cross-sectional median.
-- LightGBM with the paper's settings (100 trees, depth 3, learning rate 0.1), retrained every 250 days on the preceding 750 days. All results out-of-sample.
+- LightGBM with the paper's settings (100 trees, depth 3, learning rate 0.1), retrained every 250 days on the preceding 750 days (the first 240 only serve as look-back for the features, so 510 days of training data). All results out-of-sample.
 - Equal-weighted top/bottom k. Main timing as in the paper (trade at the signal's close), plus a one-day lag.
 - Corwin-Schultz spreads averaged over 21 days, floored at one tick. Universe: point-in-time index members.
 - Leakage test with random features: returns close to zero.
@@ -51,6 +51,8 @@ CRSP daily data and S&P 500 membership via WRDS, 1990–2025, including delisted
 Wharton Research Data Services (WRDS) was used in preparing this project: "ML Statistical Arbitrage after Trading Costs". This service and the data available thereon constitute valuable intellectual property and trade secrets of WRDS and/or its third-party suppliers.
 
 ## Run
+
+Python 3.11 or later.
 
 ```bash
 pip install -r requirements.txt
